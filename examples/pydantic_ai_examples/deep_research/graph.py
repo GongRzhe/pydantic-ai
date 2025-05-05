@@ -20,6 +20,9 @@ class Node[InputT, OutputT]:
     _force_input_contravariant: Callable[[InputT], None]
     _force_output_covariant: OutputT
 
+    async def run(self, inputs: InputT) -> OutputT:
+        raise NotImplementedError
+
 
 @dataclass
 class Interruption[StopT, ResumeT]:

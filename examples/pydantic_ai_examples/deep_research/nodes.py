@@ -1,10 +1,49 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import cast, get_args, get_origin
+
+from pydantic import TypeAdapter
+from pydantic_core import to_json
+
+from pydantic_ai import Agent, models
 
 from .graph import Node
 
 
-@dataclass
+class TypeForm[T]:
+    pass
+
+
+@dataclass(init=False)
 class Prompt[InputT, OutputT](Node[InputT, OutputT]):
-    prompt: str
-    input_type: type[InputT] = field(init=False)
-    output_type: type[OutputT] = field(init=False)
+    agent: Agent[None, OutputT]
+
+    def __init__(
+        self,
+        input_type: type[InputT],
+        output_type: type[OutputT] | type[TypeForm[OutputT]],
+        prompt: str,
+        model: models.Model | models.KnownModelName | str = 'openai:gpt-4o',
+    ):
+        input_json_schema = to_json(
+            TypeAdapter(input_type).json_schema(), indent=2
+        ).decode()
+        instructions = '\n'.join(
+            [
+                'You will receive messages matching the following JSON schema:',
+                input_json_schema,
+                '',
+                'Generate output based on the following instructions:',
+                prompt,
+            ]
+        )
+        if get_origin(output_type) is TypeForm:
+            output_type = get_args(output_type)[0]
+        self.agent = Agent(
+            model=model,
+            output_type=cast(type[OutputT], output_type),
+            instructions=instructions,
+        )
+
+    async def run(self, inputs: InputT) -> OutputT:
+        result = await self.agent.run(to_json(inputs, indent=2).decode())
+        return result.output

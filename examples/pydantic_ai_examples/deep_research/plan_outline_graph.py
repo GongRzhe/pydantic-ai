@@ -25,7 +25,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .graph import GraphBuilder, Interruption, Routing
-from .nodes import Prompt
+from .nodes import Prompt, TypeForm
 from .shared_types import MessageHistory, Outline
 
 
@@ -102,16 +102,22 @@ class YieldToHuman:
 
 
 # Graph nodes
-handle_user_message = Prompt[MessageHistory, Refuse | Clarify | Proceed](
-    'Decide how to proceed from user message',  # prompt
+handle_user_message = Prompt(
+    input_type=MessageHistory,
+    output_type=TypeForm[Refuse | Clarify | Proceed],
+    prompt='Decide how to proceed from user message',  # prompt
 )
 
-generate_outline = Prompt[GenerateOutlineInputs, Outline](
-    'Generate the outline',
+generate_outline = Prompt(
+    input_type=GenerateOutlineInputs,
+    output_type=Outline,
+    prompt='Generate the outline',
 )
 
-review_outline = Prompt[ReviewOutlineInputs, OutlineNeedsRevision | OutlineApproved](
-    'Review the outline',
+review_outline = Prompt(
+    input_type=ReviewOutlineInputs,
+    output_type=TypeForm[OutlineNeedsRevision | OutlineApproved],
+    prompt='Review the outline',
 )
 
 # Graph
