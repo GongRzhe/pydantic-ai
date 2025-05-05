@@ -892,7 +892,7 @@ Beyond the diagrams shown above, you can also customize mermaid diagrams with th
 * The [`highlighted_nodes`][pydantic_graph.graph.Graph.mermaid_code] parameter allows you to highlight specific node(s) in the diagram
 
 Putting that together, we can edit the last [`ai_q_and_a_graph.py`](#example-human-in-the-loop) example to:
-
+lambda _s, _i, o: Interruption(YieldToHuman(o.message), handle_user_message)
 * add labels to some edges
 * add a note to the `Ask` node
 * highlight the `Answer` node

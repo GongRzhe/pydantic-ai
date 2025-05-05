@@ -25,7 +25,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .graph import GraphBuilder, Interruption, Routing
-from .nodes import Prompt, TypeForm
+from .nodes import Prompt, TypeUnion
 from .shared_types import MessageHistory, Outline
 
 
@@ -104,7 +104,7 @@ class YieldToHuman:
 # Graph nodes
 handle_user_message = Prompt(
     input_type=MessageHistory,
-    output_type=TypeForm[Refuse | Clarify | Proceed],
+    output_type=TypeUnion[Refuse | Clarify | Proceed],
     prompt='Decide how to proceed from user message',  # prompt
 )
 
@@ -116,7 +116,7 @@ generate_outline = Prompt(
 
 review_outline = Prompt(
     input_type=ReviewOutlineInputs,
-    output_type=TypeForm[OutlineNeedsRevision | OutlineApproved],
+    output_type=TypeUnion[OutlineNeedsRevision | OutlineApproved],
     prompt='Review the outline',
 )
 
@@ -129,20 +129,22 @@ g = GraphBuilder[
 
 g.start_at(routing=lambda h: Routing[h(MessageHistory).route_to(handle_user_message)])
 g.edges(
-    handle_user_message,
-    lambda h: Routing[
-        h(Refuse).end()
-        | h(Proceed)
+    h := g.handle(handle_user_message),
+    g.case(h(Refuse).end())
+    .case(
+        h(Proceed)
         .transform(
             lambda _s, i, _o: GenerateOutlineInputs(chat=i, feedback=None),
         )
         .route_to(generate_outline)
-        | h(Clarify)
+    )
+    .case(
+        h(Clarify)
         .transform(
             lambda _s, _i, o: Interruption(YieldToHuman(o.message), handle_user_message)
         )
         .end()
-    ],
+    ),
 )
 g.edges(
     generate_outline,

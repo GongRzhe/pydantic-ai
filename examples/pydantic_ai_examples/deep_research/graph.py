@@ -17,8 +17,6 @@ NodeId = NewType('NodeId', str)
 
 class Node[InputT, OutputT]:
     id: NodeId
-    _force_input_contravariant: Callable[[InputT], None]
-    _force_output_covariant: OutputT
 
     async def run(self, inputs: InputT) -> OutputT:
         raise NotImplementedError
@@ -97,6 +95,11 @@ class Graph[StateT, InputT, OutputT]:
     routed_edges: list[tuple[NodeId, AnyRoutingCallable[StateT, OutputT, Any]]]
 
     def run(self, state: StateT, inputs: InputT) -> OutputT:
+        raise NotImplementedError
+
+    def resume[NodeInputT](
+        self, state: StateT, node: Node[NodeInputT, Any], node_inputs: NodeInputT
+    ) -> OutputT:
         raise NotImplementedError
 
 

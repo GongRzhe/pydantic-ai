@@ -9,7 +9,7 @@ from pydantic_ai import Agent, models
 from .graph import Node
 
 
-class TypeForm[T]:
+class TypeUnion[T]:
     pass
 
 
@@ -20,7 +20,7 @@ class Prompt[InputT, OutputT](Node[InputT, OutputT]):
     def __init__(
         self,
         input_type: type[InputT],
-        output_type: type[OutputT] | type[TypeForm[OutputT]],
+        output_type: type[OutputT] | type[TypeUnion[OutputT]],
         prompt: str,
         model: models.Model | models.KnownModelName | str = 'openai:gpt-4o',
     ):
@@ -36,7 +36,7 @@ class Prompt[InputT, OutputT](Node[InputT, OutputT]):
                 prompt,
             ]
         )
-        if get_origin(output_type) is TypeForm:
+        if get_origin(output_type) is TypeUnion:
             output_type = get_args(output_type)[0]
         self.agent = Agent(
             model=model,
