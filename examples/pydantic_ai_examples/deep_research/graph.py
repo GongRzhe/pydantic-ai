@@ -101,20 +101,34 @@ class HandleMaker[GraphStateT, GraphOutputT, HandleInputT](Protocol):
     def __call__[T](
         self, type_: type[T]
     ) -> Handle[T, GraphStateT, GraphOutputT, HandleInputT, T]:
-        raise NotImplementedError
+        return Handle(type_)
 
 
 @dataclass
 class Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, HandleOutputT]:
+    _source_type: type[SourceT]
+    _transforms: tuple[Callable[[GraphStateT, HandleInputT, Any], Any], ...] = field(
+        default=()
+    )
+
+    _end: bool = field(init=False, default=False)
+
+    # Note: _route_to must use `Any` instead of `HandleOutputT` in the first argument to keep this type contravariant in
+    # HandleOutputT. I _believe_ this is safe because instances of this type should never get mutated after this is set.
+    _route_to: Node[Any, Any] | None = field(init=False, default=None)
+
     def transform[T](
         self, call: Callable[[GraphStateT, HandleInputT, HandleOutputT], T]
     ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]:
-        raise NotImplementedError
+        new_transforms = self._transforms + (call,)
+        return Handle(self._source_type, new_transforms)
 
     def end(
         self: Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, GraphOutputT],
     ) -> type[SourceT]:
-        raise NotImplementedError
+        self._end = True
+        return self._source_type
 
-    def route_to(self, n: Node[HandleOutputT, Any]) -> type[SourceT]:
-        raise NotImplementedError
+    def route_to(self, node: Node[HandleOutputT, Any]) -> type[SourceT]:
+        self._route_to = node
+        return self._source_type
