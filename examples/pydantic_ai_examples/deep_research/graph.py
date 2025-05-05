@@ -43,7 +43,7 @@ class GraphBuilder[StateT, InputT, OutputT]:
     _start_at: AnyRoutingCallable[StateT, OutputT, InputT] | None = field(
         init=False, default=None
     )
-    _edges: list[tuple[Node[Any, Any], Node[Any, Any]]] = field(
+    _simple_edges: list[tuple[Node[Any, Any], Node[Any, Any]]] = field(
         init=False, default_factory=list
     )
     _routed_edges: list[
@@ -54,9 +54,9 @@ class GraphBuilder[StateT, InputT, OutputT]:
         self._start_at = routing
 
     def edge[T](self, source: Node[Any, T], destination: Node[T, Any]):
-        self._edges.append((source, destination))
+        self._simple_edges.append((source, destination))
 
-    def routed_edge[NodeInputT, NodeOutputT](
+    def edges[NodeInputT, NodeOutputT](
         self,
         node: Node[NodeInputT, NodeOutputT],
         routing: Callable[
@@ -74,7 +74,7 @@ class GraphBuilder[StateT, InputT, OutputT]:
         return Graph[StateT, InputT, OutputT](
             nodes=nodes,
             start_at=self._start_at,
-            edges=[(e[0].id, e[1].id) for e in self._edges],
+            edges=[(e[0].id, e[1].id) for e in self._simple_edges],
             routed_edges=[(d[0].id, d[1]) for d in self._routed_edges],
         )
 

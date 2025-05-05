@@ -122,13 +122,13 @@ g = GraphBuilder[
 ]()
 
 g.start_at(routing=lambda h: Routing[h(MessageHistory).route_to(handle_user_message)])
-g.routed_edge(
+g.edges(
     handle_user_message,
     lambda h: Routing[
         h(Refuse).end()
         | h(Proceed)
         .transform(
-            call=lambda s, _i, _o: GenerateOutlineInputs(chat=s.chat, feedback=None),
+            lambda _s, i, _o: GenerateOutlineInputs(chat=i, feedback=None),
         )
         .route_to(generate_outline)
         | h(Clarify)
@@ -138,7 +138,7 @@ g.routed_edge(
         .end()
     ],
 )
-g.routed_edge(
+g.edges(
     generate_outline,
     lambda h: Routing[
         h(Outline)
@@ -147,7 +147,7 @@ g.routed_edge(
     ],
 )
 
-g.routed_edge(
+g.edges(
     review_outline,
     lambda h: Routing[
         h(OutlineNeedsRevision)
@@ -167,3 +167,5 @@ g.routed_edge(
         .end()
     ],
 )
+
+graph = g.build()

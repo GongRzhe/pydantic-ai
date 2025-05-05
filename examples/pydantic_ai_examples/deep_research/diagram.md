@@ -37,15 +37,16 @@ stateDiagram-v2
     %% ──────────────────── PLAN OUTLINE ─────────────────
     state PlanOutline {
         [*]
-        ClarifyRequest: Clarify user request & scope
+        Decide: Decide whether to request clarification, refuse, or proceed
         HumanFeedback: Human provides clarifications
         GenerateOutline: Draft initial outline
         ReviewOutline: Supervisor reviews outline
 
-        [*] --> ClarifyRequest
-        ClarifyRequest --> HumanFeedback: need more info
-        HumanFeedback --> ClarifyRequest
-        ClarifyRequest --> GenerateOutline: ready
+        [*] --> Decide
+        Decide --> HumanFeedback: Clarify
+        Decide --> [*]: Refuse
+        Decide --> GenerateOutline: Proceed
+        HumanFeedback --> Decide
         GenerateOutline --> ReviewOutline
         ReviewOutline --> GenerateOutline: revise
         ReviewOutline --> [*]: approve
