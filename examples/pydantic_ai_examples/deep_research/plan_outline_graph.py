@@ -127,25 +127,25 @@ g = GraphBuilder[
     Refuse | OutlineStageOutput | Interruption[YieldToHuman, MessageHistory],
 ]()
 
+
+def transform_proceed(_s: State, i: MessageHistory, _o: Proceed):
+    return GenerateOutlineInputs(chat=i, feedback=None)
+
+
+def transform_clarify(_s: State, _i: MessageHistory, o: Clarify):
+    return Interruption(YieldToHuman(o.message), handle_user_message)
+
+
 g.start_at(routing=lambda h: Routing[h(MessageHistory).route_to(handle_user_message)])
 g.edges(
-    h := g.handle(handle_user_message),
-    g.case(h(Refuse).end())
-    .case(
-        h(Proceed)
-        .transform(
-            lambda _s, i, _o: GenerateOutlineInputs(chat=i, feedback=None),
-        )
-        .route_to(generate_outline)
-    )
-    .case(
-        h(Clarify)
-        .transform(
-            lambda _s, _i, o: Interruption(YieldToHuman(o.message), handle_user_message)
-        )
-        .end()
-    ),
+    handle_user_message,
+    lambda h: Routing[
+        h(Refuse).end()
+        | h(Proceed).transform(transform_proceed).route_to(generate_outline)
+        | h(Clarify).transform(transform_clarify).end()
+    ],
 )
+
 g.edges(
     generate_outline,
     lambda h: Routing[

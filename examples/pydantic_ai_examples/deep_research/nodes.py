@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import cast, get_args, get_origin
+from typing import Any, cast, get_args, get_origin
 
 from pydantic import TypeAdapter
 from pydantic_core import to_json
@@ -14,7 +14,7 @@ class TypeUnion[T]:
 
 
 @dataclass(init=False)
-class Prompt[InputT, OutputT](Node[InputT, OutputT]):
+class Prompt[InputT, OutputT](Node[Any, InputT, OutputT]):
     agent: Agent[None, OutputT]
 
     def __init__(
@@ -44,6 +44,6 @@ class Prompt[InputT, OutputT](Node[InputT, OutputT]):
             instructions=instructions,
         )
 
-    async def run(self, inputs: InputT) -> OutputT:
+    async def run(self, state: Any, inputs: InputT) -> OutputT:
         result = await self.agent.run(to_json(inputs, indent=2).decode())
         return result.output
