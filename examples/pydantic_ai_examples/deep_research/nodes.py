@@ -1,12 +1,19 @@
 from dataclasses import dataclass
-from typing import Any, cast, get_args, get_origin
+from typing import Any, NewType, cast, get_args, get_origin
 
 from pydantic import TypeAdapter
 from pydantic_core import to_json
 
 from pydantic_ai import Agent, models
 
-from .graph import Node
+NodeId = NewType('NodeId', str)
+
+
+class Node[StateT, InputT, OutputT]:
+    id: NodeId
+
+    async def run(self, state: StateT, inputs: InputT) -> OutputT:
+        raise NotImplementedError
 
 
 class TypeUnion[T]:

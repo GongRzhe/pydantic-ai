@@ -1,4 +1,4 @@
-"""PlanOutline subgraph
+"""PlanOutline subgraph.
 
 state PlanOutline {
     [*]
@@ -24,7 +24,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .graph import GraphBuilder, Interruption, Routing
+from .graph import Graph, Interruption, Routing
 from .nodes import Prompt, TypeUnion
 from .shared_types import MessageHistory, Outline
 
@@ -56,7 +56,7 @@ class Refuse(BaseModel):
 
 
 class Proceed(BaseModel):
-    """There is enough information to proceed with handling the user's request"""
+    """There is enough information to proceed with handling the user's request."""
 
     choice: Literal['proceed']
 
@@ -78,18 +78,18 @@ class ReviewOutlineInputs(BaseModel):
     outline: Outline
 
 
-class OutlineNeedsRevision(BaseModel):
+class ReviseOutline(BaseModel):
     choice: Literal['revise']
     details: str
 
 
-class OutlineApproved(BaseModel):
+class ApproveOutline(BaseModel):
     choice: Literal['approve']
     message: str  # message to user describing the research you are going to do
 
 
 class OutlineStageOutput(BaseModel):
-    """Use this if you have enough information to proceed"""
+    """Use this if you have enough information to proceed."""
 
     outline: Outline  # outline of the research
     message: str  # message to show user before beginning research
@@ -116,27 +116,47 @@ generate_outline = Prompt(
 
 review_outline = Prompt(
     input_type=ReviewOutlineInputs,
-    output_type=TypeUnion[OutlineNeedsRevision | OutlineApproved],
+    output_type=TypeUnion[ReviseOutline | ApproveOutline],
     prompt='Review the outline',
 )
 
+
+def transform_proceed(inputs: MessageHistory):
+    return GenerateOutlineInputs(chat=inputs, feedback=None)
+
+
+def transform_clarify(output: Clarify):
+    return Interruption(YieldToHuman(output.message), handle_user_message)
+
+
+def transform_outline(state: State, output: Outline):
+    return ReviewOutlineInputs(chat=state.chat, outline=output)
+
+
+def transform_revise_outline(
+    state: State, inputs: ReviewOutlineInputs, output: ReviseOutline
+):
+    return GenerateOutlineInputs(
+        chat=state.chat,
+        feedback=ExistingOutlineFeedback(
+            outline=inputs.outline, feedback=output.details
+        ),
+    )
+
+
+def transform_approve_outline(inputs: ReviewOutlineInputs, output: ApproveOutline):
+    return OutlineStageOutput(outline=inputs.outline, message=output.message)
+
+
 # Graph
-g = GraphBuilder[
-    State,
-    MessageHistory,
-    Refuse | OutlineStageOutput | Interruption[YieldToHuman, MessageHistory],
-]()
-
-
-def transform_proceed(_s: State, i: MessageHistory, _o: Proceed):
-    return GenerateOutlineInputs(chat=i, feedback=None)
-
-
-def transform_clarify(_s: State, _i: MessageHistory, o: Clarify):
-    return Interruption(YieldToHuman(o.message), handle_user_message)
-
-
-g.start_at(routing=lambda h: Routing[h(MessageHistory).route_to(handle_user_message)])
+g = Graph.builder(
+    state_type=State,
+    input_type=MessageHistory,
+    output_type=TypeUnion[
+        Refuse | OutlineStageOutput | Interruption[YieldToHuman, MessageHistory]
+    ],
+    start_at=handle_user_message,
+)
 g.edges(
     handle_user_message,
     lambda h: Routing[
@@ -145,34 +165,28 @@ g.edges(
         | h(Clarify).transform(transform_clarify).end()
     ],
 )
-
+# g.edge(
+#     source=generate_outline,
+#     transform=transform_outline,
+#     destination=review_outline,
+# )
+# g.edges(  # or g.edge?
+#     generate_outline,
+#     review_outline,
+# )
+# g.edges(
+#     generate_outline,
+#     lambda h: Routing[h(Outline).route_to(review_outline)],
+# )
 g.edges(
     generate_outline,
-    lambda h: Routing[
-        h(Outline)
-        .transform(lambda s, _i, o: ReviewOutlineInputs(chat=s.chat, outline=o))
-        .route_to(review_outline)
-    ],
+    lambda h: Routing[h(Outline).transform(transform_outline).route_to(review_outline)],
 )
-
 g.edges(
     review_outline,
     lambda h: Routing[
-        h(OutlineNeedsRevision)
-        .transform(
-            call=lambda s, i, o: GenerateOutlineInputs(
-                chat=s.chat,
-                feedback=ExistingOutlineFeedback(outline=i.outline, feedback=o.details),
-            ),
-        )
-        .route_to(generate_outline)
-        | h(OutlineApproved)
-        .transform(
-            call=lambda _s, i, o: OutlineStageOutput(
-                outline=i.outline, message=o.message
-            ),
-        )
-        .end()
+        h(ReviseOutline).transform(transform_revise_outline).route_to(generate_outline)
+        | h(ApproveOutline).transform(transform_approve_outline).end()
     ],
 )
 

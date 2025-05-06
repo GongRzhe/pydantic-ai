@@ -17,8 +17,6 @@ OutlineNode.model_rebuild()
 
 
 class Outline(BaseModel):
-    """TODO: This should not involve a recursive type — some vendors don't do a good job generating
-    recursive models.
-    """
+    """TODO: This should not involve a recursive type — some vendors don't do a good job generating recursive models."""
 
     root: OutlineNode
