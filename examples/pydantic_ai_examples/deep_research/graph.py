@@ -181,53 +181,46 @@ class HandleMaker[GraphStateT, GraphOutputT, HandleInputT](Protocol):
         self, type_: type[T], is_instance: Callable[[Any], bool] | None = None
     ) -> Handle[T, GraphStateT, GraphOutputT, HandleInputT, T]:
         if is_instance is None:
-            is_instance = lambda v: isinstance(v, type_)
+
+            def _is_instance(v: Any) -> bool:
+                return isinstance(v, type_)
+
+            is_instance = _is_instance
+
         return Handle(type_, is_instance)
 
 
-class _TransformState[StateT, T](Protocol):
-    def __call__(self, state: StateT) -> T:
-        raise NotImplementedError
+class TransformContext[StateT, InputT, OutputT]:
+    """The main reason this is not a dataclass is that we need it to be covariant in its type parameters."""
+
+    def __init__(self, state: StateT, inputs: InputT, output: OutputT):
+        self._state = state
+        self._inputs = inputs
+        self._output = output
+
+    @property
+    def state(self) -> StateT:
+        return self._state
+
+    @property
+    def inputs(self) -> InputT:
+        return self._inputs
+
+    @property
+    def output(self) -> OutputT:
+        return self._output
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(state={self.state}, inputs={self.inputs}, output={self.output})'
 
 
-class _TransformInput[InputT, T](Protocol):
-    def __call__(self, inputs: InputT) -> T:
-        raise NotImplementedError
-
-
-class _TransformOutput[OutputT, T](Protocol):
-    def __call__(self, output: OutputT) -> T:
-        raise NotImplementedError
-
-
-class _TransformStateInput[StateT, InputT, T](Protocol):
-    def __call__(self, state: StateT, inputs: InputT) -> T:
-        raise NotImplementedError
-
-
-class _TransformStateOutput[StateT, OutputT, T](Protocol):
-    def __call__(self, state: StateT, output: OutputT) -> T:
-        raise NotImplementedError
-
-
-class _TransformInputOutput[InputT, OutputT, T](Protocol):
-    def __call__(self, inputs: InputT, output: OutputT) -> T:
-        raise NotImplementedError
-
-
-class _TransformStateInputOutput[StateT, InputT, OutputT, T](Protocol):
-    def __call__(self, state: StateT, inputs: InputT, output: OutputT) -> T:
+class _Transform[StateT, InputT, OutputT, T](Protocol):
+    def __call__(self, ctx: TransformContext[StateT, InputT, OutputT]) -> T:
         raise NotImplementedError
 
 
 type TransformFunction[StateT, SourceInputT, SourceOutputT, DestinationInputT] = (
-    _TransformState[StateT, DestinationInputT]
-    | _TransformInput[SourceInputT, DestinationInputT]
-    | _TransformOutput[SourceOutputT, DestinationInputT]
-    | _TransformStateInput[StateT, SourceInputT, DestinationInputT]
-    | _TransformStateOutput[StateT, SourceOutputT, DestinationInputT]
-    | _TransformInputOutput[SourceInputT, SourceOutputT, DestinationInputT]
-    | _TransformStateInputOutput[StateT, SourceInputT, SourceOutputT, DestinationInputT]
+    _Transform[StateT, SourceInputT, SourceOutputT, DestinationInputT]
 )
 
 
@@ -255,44 +248,9 @@ class Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, HandleOutputT]:
         self._route_to = node
         return self._source_type
 
-    @overload
-    def transform[T](
-        self, call: _TransformState[GraphStateT, T]
-    ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]: ...
-
-    @overload
-    def transform[T](
-        self, call: _TransformInput[HandleInputT, T]
-    ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]: ...
-
-    @overload
-    def transform[T](
-        self, call: _TransformOutput[HandleOutputT, T]
-    ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]: ...
-
-    @overload
-    def transform[T](
-        self, call: _TransformStateInput[GraphStateT, HandleInputT, T]
-    ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]: ...
-
-    @overload
-    def transform[T](
-        self, call: _TransformStateOutput[GraphStateT, HandleOutputT, T]
-    ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]: ...
-
-    @overload
-    def transform[T](
-        self, call: _TransformInputOutput[HandleInputT, HandleOutputT, T]
-    ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]: ...
-
-    @overload
     def transform[T](
         self,
-        call: _TransformStateInputOutput[GraphStateT, HandleInputT, HandleOutputT, T],
-    ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]: ...
-
-    def transform[T](
-        self, call: TransformFunction[Any, Any, Any, T]
+        call: _Transform[GraphStateT, HandleInputT, HandleOutputT, T],
     ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]:
         new_transforms = self._transforms + (call,)
         return Handle(self._source_type, self._is_instance, new_transforms)

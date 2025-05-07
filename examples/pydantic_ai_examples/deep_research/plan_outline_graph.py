@@ -24,7 +24,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .graph import Graph, Interruption, Routing
+from .graph import Graph, Interruption, Routing, TransformContext
 from .nodes import Prompt, TypeUnion
 from .shared_types import MessageHistory, Outline
 
@@ -121,31 +121,33 @@ review_outline = Prompt(
 )
 
 
-def transform_proceed(inputs: MessageHistory):
-    return GenerateOutlineInputs(chat=inputs, feedback=None)
+def transform_proceed(ctx: TransformContext[object, MessageHistory, object]):
+    return GenerateOutlineInputs(chat=ctx.inputs, feedback=None)
 
 
-def transform_clarify(output: Clarify):
-    return Interruption(YieldToHuman(output.message), handle_user_message)
+def transform_clarify(ctx: TransformContext[object, object, Clarify]):
+    return Interruption(YieldToHuman(ctx.output.message), handle_user_message)
 
 
-def transform_outline(state: State, output: Outline):
-    return ReviewOutlineInputs(chat=state.chat, outline=output)
+def transform_outline(ctx: TransformContext[State, object, Outline]):
+    return ReviewOutlineInputs(chat=ctx.state.chat, outline=ctx.output)
 
 
 def transform_revise_outline(
-    state: State, inputs: ReviewOutlineInputs, output: ReviseOutline
+    ctx: TransformContext[State, ReviewOutlineInputs, ReviseOutline],
 ):
     return GenerateOutlineInputs(
-        chat=state.chat,
+        chat=ctx.state.chat,
         feedback=ExistingOutlineFeedback(
-            outline=inputs.outline, feedback=output.details
+            outline=ctx.inputs.outline, feedback=ctx.output.details
         ),
     )
 
 
-def transform_approve_outline(inputs: ReviewOutlineInputs, output: ApproveOutline):
-    return OutlineStageOutput(outline=inputs.outline, message=output.message)
+def transform_approve_outline(
+    ctx: TransformContext[object, ReviewOutlineInputs, ApproveOutline],
+):
+    return OutlineStageOutput(outline=ctx.inputs.outline, message=ctx.output.message)
 
 
 # Graph
@@ -165,6 +167,17 @@ g.edges(
         | h(Clarify).transform(transform_clarify).end()
     ],
 )
+g.edges(
+    generate_outline,
+    lambda h: Routing[h(Outline).transform(transform_outline).route_to(review_outline)],
+)
+g.edges(
+    review_outline,
+    lambda h: Routing[
+        h(ReviseOutline).transform(transform_revise_outline).route_to(generate_outline)
+        | h(ApproveOutline).transform(transform_approve_outline).end()
+    ],
+)
 # g.edge(
 #     source=generate_outline,
 #     transform=transform_outline,
@@ -178,16 +191,5 @@ g.edges(
 #     generate_outline,
 #     lambda h: Routing[h(Outline).route_to(review_outline)],
 # )
-g.edges(
-    generate_outline,
-    lambda h: Routing[h(Outline).transform(transform_outline).route_to(review_outline)],
-)
-g.edges(
-    review_outline,
-    lambda h: Routing[
-        h(ReviseOutline).transform(transform_revise_outline).route_to(generate_outline)
-        | h(ApproveOutline).transform(transform_approve_outline).end()
-    ],
-)
 
 graph = g.build()
