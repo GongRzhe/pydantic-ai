@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, overload
+from typing import Any, Callable, Never, Protocol, overload
 
 from .nodes import Node, NodeId, TypeUnion
 
@@ -53,22 +53,24 @@ class FullNodeFunction[StateT, InputT, OutputT](Protocol):
 
 
 @overload
-def node[OutputT](fn: EmptyNodeFunction[OutputT]) -> Node[Any, None, OutputT]: ...
+def graph_node[OutputT](
+    fn: EmptyNodeFunction[OutputT],
+) -> Node[Any, object, OutputT]: ...
 @overload
-def node[InputT, OutputT](
+def graph_node[InputT, OutputT](
     fn: InputNodeFunction[InputT, OutputT],
 ) -> Node[Any, InputT, OutputT]: ...
 @overload
-def node[StateT, OutputT](
+def graph_node[StateT, OutputT](
     fn: StateNodeFunction[StateT, OutputT],
-) -> Node[StateT, None, OutputT]: ...
+) -> Node[StateT, object, OutputT]: ...
 @overload
-def node[StateT, InputT, OutputT](
+def graph_node[StateT, InputT, OutputT](
     fn: FullNodeFunction[StateT, InputT, OutputT],
 ) -> Node[StateT, InputT, OutputT]: ...
 
 
-def node(fn: Callable[..., Any]) -> Node[Any, Any, Any]:
+def graph_node(fn: Callable[..., Any]) -> Node[Any, Any, Any]:
     signature = inspect.signature(fn)
     signature_error = "Function may only make use of parameters 'state' and 'inputs'"
     node_id = NodeId(fn.__name__)
@@ -86,9 +88,29 @@ def node(fn: Callable[..., Any]) -> Node[Any, Any, Any]:
         return CallNode(id=node_id, call=lambda state, inputs: fn())
 
 
-type Router[StateT, GraphOutputT, SourceInputT, SourceOutputT] = Callable[
-    [HandleMaker[StateT, GraphOutputT, SourceInputT]], type[Routing[SourceOutputT]]
-]
+class EdgeStart[GraphStateT, NodeInputT, NodeOutputT](Protocol):
+    _make_covariant: Callable[[NodeInputT], NodeInputT]
+    _make_invariant: Callable[[NodeOutputT], NodeOutputT]
+
+    @staticmethod
+    def __call__[SourceT](
+        source: type[SourceT],
+    ) -> Edge[SourceT, GraphStateT, NodeInputT, SourceT]:
+        raise NotImplementedError
+
+
+class Edges[SourceT, EndT]:
+    _force_source_invariant: Callable[[SourceT], SourceT]
+    _force_end_covariant: Callable[[], EndT]
+
+    def branch[S, E, S2, E2](
+        self: Edges[S, E], edge: Edges[S2, E2]
+    ) -> Edges[S | S2, E | E2]:
+        raise NotImplementedError
+
+
+def edges() -> Edges[Never, Never]:
+    raise NotImplementedError
 
 
 @dataclass
@@ -99,46 +121,56 @@ class GraphBuilder[StateT, InputT, OutputT]:
     input_type: type[InputT] = field(init=False)
     output_type: type[OutputT] = field(init=False)
 
-    _start_at: Router[StateT, OutputT, InputT, InputT] | Node[StateT, InputT, Any]
-    _simple_edges: list[
-        tuple[
-            Node[StateT, Any, Any],
-            TransformFunction[StateT, Any, Any, Any] | None,
-            Node[StateT, Any, Any],
-        ]
-    ] = field(init=False, default_factory=list)
-    _routed_edges: list[
-        tuple[Node[StateT, Any, Any], Router[StateT, OutputT, Any, Any]]
-    ] = field(init=False, default_factory=list)
+    # _start_at: Router[StateT, OutputT, InputT, InputT] | Node[StateT, InputT, Any]
+    # _simple_edges: list[
+    #     tuple[
+    #         Node[StateT, Any, Any],
+    #         TransformFunction[StateT, Any, Any, Any] | None,
+    #         Node[StateT, Any, Any],
+    #     ]
+    # ] = field(init=False, default_factory=list)
+    # _routed_edges: list[
+    #     tuple[Node[StateT, Any, Any], Router[StateT, OutputT, Any, Any]]
+    # ] = field(init=False, default_factory=list)
 
-    def edge[T](
-        self,
-        *,
-        source: Node[StateT, Any, T],
-        transform: TransformFunction[StateT, Any, Any, T] | None = None,
-        destination: Node[StateT, T, Any],
-    ):
-        self._simple_edges.append((source, transform, destination))
+    def start_edge[NodeInputT, NodeOutputT](
+        self, node: Node[StateT, NodeInputT, NodeOutputT]
+    ) -> EdgeStart[StateT, NodeInputT, NodeOutputT]:
+        raise NotImplementedError
 
-    def edges[SourceInputT, SourceOutputT](
-        self,
-        source: Node[StateT, SourceInputT, SourceOutputT],
-        routing: Router[StateT, OutputT, SourceInputT, SourceOutputT],
-    ):
-        self._routed_edges.append((source, routing))
+    def add_edges[T](
+        self, start: EdgeStart[StateT, Any, T], edges_: Edges[T, OutputT]
+    ) -> None:
+        raise NotImplementedError
 
-    def build(self) -> Graph[StateT, InputT, OutputT]:
-        # TODO: Build nodes from edges/decisions
-        nodes: dict[NodeId, Node[StateT, Any, Any]] = {}
-        assert self._start_at is not None, (
-            'You must call `GraphBuilder.start_at` before building the graph.'
-        )
-        return Graph[StateT, InputT, OutputT](
-            nodes=nodes,
-            start_at=self._start_at,
-            edges=[(e[0].id, e[1], e[2].id) for e in self._simple_edges],
-            routed_edges=[(d[0].id, d[1]) for d in self._routed_edges],
-        )
+    # def edge[T](
+    #     self,
+    #     *,
+    #     source: Node[StateT, Any, T],
+    #     transform: TransformFunction[StateT, Any, Any, T] | None = None,
+    #     destination: Node[StateT, T, Any],
+    # ):
+    #     self._simple_edges.append((source, transform, destination))
+    #
+    # def edges[SourceInputT, SourceOutputT](
+    #     self,
+    #     source: Node[StateT, SourceInputT, SourceOutputT],
+    #     routing: Router[StateT, OutputT, SourceInputT, SourceOutputT],
+    # ):
+    #     self._routed_edges.append((source, routing))
+
+    # def build(self) -> Graph[StateT, InputT, OutputT]:
+    #     # TODO: Build nodes from edges/decisions
+    #     nodes: dict[NodeId, Node[StateT, Any, Any]] = {}
+    #     assert self._start_at is not None, (
+    #         'You must call `GraphBuilder.start_at` before building the graph.'
+    #     )
+    #     return Graph[StateT, InputT, OutputT](
+    #         nodes=nodes,
+    #         start_at=self._start_at,
+    #         edges=[(e[0].id, e[1], e[2].id) for e in self._simple_edges],
+    #         routed_edges=[(d[0].id, d[1]) for d in self._routed_edges],
+    #     )
 
     def _check_output(self, output: OutputT) -> None:
         raise RuntimeError(
@@ -151,43 +183,30 @@ class Graph[StateT, InputT, OutputT]:
     nodes: dict[NodeId, Node[StateT, Any, Any]]
 
     # TODO: May need to tweak the following to actually work at runtime...
-    start_at: Router[StateT, OutputT, InputT, InputT] | Node[StateT, InputT, Any]
-    edges: list[tuple[NodeId, Any, NodeId]]
-    routed_edges: list[tuple[NodeId, Router[StateT, OutputT, Any, Any]]]
+    # start_at: Router[StateT, OutputT, InputT, InputT] | Node[StateT, InputT, Any]
+    # edges: list[tuple[NodeId, Any, NodeId]]
+    # routed_edges: list[tuple[NodeId, Router[StateT, OutputT, Any, Any]]]
 
     @staticmethod
     def builder[S, I, O](
         state_type: type[S],
         input_type: type[I],
         output_type: type[TypeUnion[O]] | type[O],
-        start_at: Node[S, I, Any] | Router[S, O, I, I],
+        # start_at: Node[S, I, Any] | Router[S, O, I, I],
     ) -> GraphBuilder[S, I, O]:
         raise NotImplementedError
 
-    def run(self, state: StateT, inputs: InputT) -> OutputT:
-        raise NotImplementedError
 
-    def resume[NodeInputT](
-        self,
-        state: StateT,
-        node: Node[StateT, NodeInputT, Any],
-        node_inputs: NodeInputT,
-    ) -> OutputT:
-        raise NotImplementedError
-
-
-class HandleMaker[GraphStateT, GraphOutputT, HandleInputT](Protocol):
-    def __call__[T](
-        self, type_: type[T], is_instance: Callable[[Any], bool] | None = None
-    ) -> Handle[T, GraphStateT, GraphOutputT, HandleInputT, T]:
-        if is_instance is None:
-
-            def _is_instance(v: Any) -> bool:
-                return isinstance(v, type_)
-
-            is_instance = _is_instance
-
-        return Handle(type_, is_instance)
+#     def run(self, state: StateT, inputs: InputT) -> OutputT:
+#         raise NotImplementedError
+#
+#     def resume[NodeInputT](
+#         self,
+#         state: StateT,
+#         node: Node[StateT, NodeInputT, Any],
+#         node_inputs: NodeInputT,
+#     ) -> OutputT:
+#         raise NotImplementedError
 
 
 class TransformContext[StateT, InputT, OutputT]:
@@ -225,13 +244,12 @@ type TransformFunction[StateT, SourceInputT, SourceOutputT, DestinationInputT] =
 
 
 @dataclass
-class Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, HandleOutputT]:
+class Edge[SourceT, GraphStateT, EdgeInputT, EdgeOutputT]:
     _source_type: type[SourceT]
     _is_instance: Callable[[Any], bool]
-    _transforms: tuple[TransformFunction[GraphStateT, HandleInputT, Any, Any], ...] = (
+    _transforms: tuple[TransformFunction[GraphStateT, EdgeInputT, Any, Any], ...] = (
         field(default=())
     )
-
     _end: bool = field(init=False, default=False)
 
     # Note: _route_to must use `Any` instead of `HandleOutputT` in the first argument to keep this type contravariant in
@@ -239,18 +257,34 @@ class Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, HandleOutputT]:
     _route_to: Node[GraphStateT, Any, Any] | None = field(init=False, default=None)
 
     def end(
-        self: Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, GraphOutputT],
-    ) -> type[SourceT]:
-        self._end = True
-        return self._source_type
+        self,
+    ) -> Edges[SourceT, EdgeOutputT]:
+        raise NotImplementedError
+        # self._end = True
+        # return self._source_type
 
-    def route_to(self, node: Node[GraphStateT, HandleOutputT, Any]) -> type[SourceT]:
-        self._route_to = node
-        return self._source_type
+    def route_to(
+        self, node: Node[GraphStateT, EdgeOutputT, Any]
+    ) -> Edges[SourceT, Never]:
+        raise NotImplementedError
 
     def transform[T](
         self,
-        call: _Transform[GraphStateT, HandleInputT, HandleOutputT, T],
-    ) -> Handle[SourceT, GraphStateT, GraphOutputT, HandleInputT, T]:
+        call: _Transform[GraphStateT, EdgeInputT, EdgeOutputT, T],
+    ) -> Edge[SourceT, GraphStateT, EdgeInputT, T]:
         new_transforms = self._transforms + (call,)
-        return Handle(self._source_type, self._is_instance, new_transforms)
+        return Edge(self._source_type, self._is_instance, new_transforms)
+
+    # def handle_parallel[HandleOutputItemT, T, S](
+    #     self: Edge[
+    #         SourceT,
+    #         GraphStateT,
+    #         GraphOutputT,
+    #         HandleInputT,
+    #         Sequence[HandleOutputItemT],
+    #     ],
+    #     node: Node[GraphStateT, HandleOutputItemT, T],
+    #     reducer: Callable[[GraphStateT, list[T]], S],
+    # ) -> Edge[SourceT, GraphStateT, GraphOutputT, HandleInputT, S]:
+    #     # This requires you to eagerly declare reduction logic; can't do dynamic joining
+    #     raise NotImplementedError

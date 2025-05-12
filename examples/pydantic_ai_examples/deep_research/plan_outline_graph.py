@@ -24,9 +24,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .graph import Graph, Interruption, Routing, TransformContext
+from .graph import Graph, Interruption, TransformContext, edges
 from .nodes import Prompt, TypeUnion
 from .shared_types import MessageHistory, Outline
+
+# from .graph import Routing, GraphBuilder
 
 
 # Types
@@ -157,27 +159,116 @@ g = Graph.builder(
     output_type=TypeUnion[
         Refuse | OutlineStageOutput | Interruption[YieldToHuman, MessageHistory]
     ],
-    start_at=handle_user_message,
+    # start_at=handle_user_message,
 )
-g.edges(
-    handle_user_message,
-    lambda h: Routing[
-        h(Refuse).end()
-        | h(Proceed).transform(transform_proceed).route_to(generate_outline)
-        | h(Clarify).transform(transform_clarify).end()
-    ],
+
+g.add_edges(
+    handle := g.start_edge(handle_user_message),
+    g.edges()
+    .branch(handle(Refuse).end())
+    .branch(handle(Proceed).transform(transform_proceed).route_to(generate_outline))
+    .branch(handle(Clarify).transform(transform_clarify).end()),
 )
-g.edges(
-    generate_outline,
-    lambda h: Routing[h(Outline).transform(transform_outline).route_to(review_outline)],
-)
-g.edges(
-    review_outline,
-    lambda h: Routing[
-        h(ReviseOutline).transform(transform_revise_outline).route_to(generate_outline)
-        | h(ApproveOutline).transform(transform_approve_outline).end()
-    ],
-)
+
+
+# g.edges(
+#     handle_user_message,
+#     lambda h: Routing[
+#         h(Refuse).end()
+#         | h(Proceed).transform(transform_proceed).route_to(generate_outline)
+#         | h(Clarify).transform(transform_clarify).end()
+#     ],
+# )
+# g.edges(
+#     generate_outline,
+#     lambda h: Routing[h(Outline).transform(transform_outline).route_to(review_outline)],
+# )
+# g.edges(
+#     review_outline,
+#     lambda h: Routing[
+#         h(ReviseOutline).transform(transform_revise_outline).route_to(generate_outline)
+#         | h(ApproveOutline).transform(transform_approve_outline).end()
+#     ],
+# )
+
+
+# class Route[SourceT, EndT]:
+#     _force_source_invariant: Callable[[SourceT], SourceT]
+#     _force_end_covariant: Callable[[], EndT]
+#
+#     def case[S, E, S2, E2](
+#         self: Route[S, E], route: Route[S2, E2]
+#     ) -> Route[S | S2, E | E2]:
+#         raise NotImplementedError
+#
+#
+# class Case[SourceT, OutT]:
+#     def _execute(self, source: SourceT) -> OutT:
+#         raise NotImplementedError
+#
+#     def transform[T](
+#         self, transform_fn: Callable[[TransformContext[Any, Any, OutT]], T]
+#     ) -> Case[SourceT, T]:
+#         raise NotImplementedError
+#
+#     def route_to(self, node: Node[Any, OutT, Any]) -> Route[SourceT, Never]:
+#         raise NotImplementedError
+#
+#     def end(self: Case[SourceT, OutT]) -> Route[SourceT, OutT]:
+#         raise NotImplementedError
+#
+#
+# def handle[SourceT](source: type[SourceT]) -> Case[SourceT, SourceT]:
+#     raise NotImplementedError
+#
+#
+# def cases() -> Route[Never, Never]:
+#     raise NotImplementedError
+#
+#
+# def add_edges[GraphOutputT, NodeOutputT](
+#     g: GraphBuilder[Any, Any, GraphOutputT],
+#     n: Node[Any, Any, NodeOutputT],
+#     c: Route[NodeOutputT, GraphOutputT],
+# ):
+#     raise NotImplementedError
+#
+#
+# # reveal_type(approve_pipe)
+# # edges = cases(
+# #     revise_pipe,
+# #     approve_pipe
+# # )
+# # add_edges(g, review_outline, edges)
+# # cases_ = cases().case(approve_pipe)#.case(revise_pipe)
+# # add_edges(g, review_outline, cases_)
+#
+# # Things that need to emit type errors:
+# # * Routing an incompatible output into a transform
+# # * Routing an incompatible output into a node
+# # * Not covering all outputs of a node
+# # * Ending a graph run with an incompatible output
+#
+# add_edges(
+#     g,
+#     review_outline,
+#     cases()
+#     .case(
+#         handle(ReviseOutline)
+#         .transform(transform_revise_outline)
+#         .route_to(generate_outline)
+#     )
+#     .case(handle(ApproveOutline).transform(transform_approve_outline).end()),
+# )
+
+# reveal_type(g)
+# reveal_type(edges)
+
+# reveal_type(review_outline)
+# reveal_type(edges)
+
+# add_edges(reveal_type(review_outline), reveal_type(edges))
+
 # g.edge(
 #     source=generate_outline,
 #     transform=transform_outline,
@@ -192,4 +283,4 @@ g.edges(
 #     lambda h: Routing[h(Outline).route_to(review_outline)],
 # )
 
-graph = g.build()
+# graph = g.build()

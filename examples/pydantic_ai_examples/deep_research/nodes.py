@@ -11,6 +11,7 @@ NodeId = NewType('NodeId', str)
 
 class Node[StateT, InputT, OutputT]:
     id: NodeId
+    _output_type: OutputT
 
     async def run(self, state: StateT, inputs: InputT) -> OutputT:
         raise NotImplementedError
