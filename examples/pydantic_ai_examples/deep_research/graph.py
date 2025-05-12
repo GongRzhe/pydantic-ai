@@ -1,35 +1,18 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Never, Protocol, overload
+from typing import Any, Callable, Never, Protocol, overload, Awaitable
 
 from .nodes import Node, NodeId, TypeUnion
 
-
-class Routing[T]:
-    """This is an auxiliary class that is purposely not a dataclass, and should not be instantiated.
-
-    It should only be used for its `__class_getitem__` method.
-    """
-
-    _force_invariant: Callable[[T], T]
-
-
 @dataclass
-class CallNode[StateT, InputT, OutputT](Node[StateT, InputT, OutputT]):
+class FunctionNode[StateT, InputT, OutputT](Node[StateT, InputT, OutputT]):
     id: NodeId
     call: Callable[[StateT, InputT], Awaitable[OutputT]]
 
     async def run(self, state: StateT, inputs: InputT) -> OutputT:
         return await self.call(state, inputs)
-
-
-@dataclass
-class Interruption[StopT, ResumeT]:
-    value: StopT
-    next_node: Node[Any, ResumeT, Any]
 
 
 class EmptyNodeFunction[OutputT](Protocol):
@@ -76,26 +59,32 @@ def graph_node(fn: Callable[..., Any]) -> Node[Any, Any, Any]:
     node_id = NodeId(fn.__name__)
     if 'state' in signature.parameters and 'inputs' in signature.parameters:
         assert len(signature.parameters) == 2, signature_error
-        return CallNode(id=node_id, call=fn)
+        return FunctionNode(id=node_id, call=fn)
     elif 'state' in signature.parameters:
         assert len(signature.parameters) == 1, signature_error
-        return CallNode(id=node_id, call=lambda state, inputs: fn(state))
+        return FunctionNode(id=node_id, call=lambda state, inputs: fn(state))
     elif 'state' in signature.parameters:
         assert len(signature.parameters) == 1, signature_error
-        return CallNode(id=node_id, call=lambda state, inputs: fn(inputs))
+        return FunctionNode(id=node_id, call=lambda state, inputs: fn(inputs))
     else:
         assert len(signature.parameters) == 0, signature_error
-        return CallNode(id=node_id, call=lambda state, inputs: fn())
+        return FunctionNode(id=node_id, call=lambda state, inputs: fn())
 
 
-class EdgeStart[GraphStateT, NodeInputT, NodeOutputT](Protocol):
-    _make_covariant: Callable[[NodeInputT], NodeInputT]
-    _make_invariant: Callable[[NodeOutputT], NodeOutputT]
+@dataclass
+class Interruption[StopT, ResumeT]:
+    value: StopT
+    next_node: Node[Any, ResumeT, Any]
+
+
+class EdgeStarter[GraphStateT, NodeInputT, NodeOutputT](Protocol):
+    _make_invariant_in_input: Callable[[NodeInputT], NodeInputT]
+    _make_invariant_in_output: Callable[[NodeOutputT], NodeOutputT]
 
     @staticmethod
     def __call__[SourceT](
         source: type[SourceT],
-    ) -> Edge[SourceT, GraphStateT, NodeInputT, SourceT]:
+    ) -> EdgeBuilder[GraphStateT, SourceT, NodeInputT, SourceT]:
         raise NotImplementedError
 
 
@@ -115,10 +104,12 @@ def edges() -> Edges[Never, Never]:
 
 @dataclass
 class GraphBuilder[StateT, InputT, OutputT]:
-    # TODO: Should get the following values from __class_getitem__ somehow;
-    #   this would make it possible to use typeforms without type errors
+    # TODO: Can we get the following values from __class_getitem__ somehow?
+    #   That would make it possible to use typeforms without type errors
     state_type: type[StateT] = field(init=False)
-    input_type: type[InputT] = field(init=False)
+    input_type: type[InputT] = field(
+        init=False
+    )  # TODO: Can we remove this and just use state?
     output_type: type[OutputT] = field(init=False)
 
     # _start_at: Router[StateT, OutputT, InputT, InputT] | Node[StateT, InputT, Any]
@@ -135,11 +126,11 @@ class GraphBuilder[StateT, InputT, OutputT]:
 
     def start_edge[NodeInputT, NodeOutputT](
         self, node: Node[StateT, NodeInputT, NodeOutputT]
-    ) -> EdgeStart[StateT, NodeInputT, NodeOutputT]:
+    ) -> EdgeStarter[StateT, NodeInputT, NodeOutputT]:
         raise NotImplementedError
 
     def add_edges[T](
-        self, start: EdgeStart[StateT, Any, T], edges_: Edges[T, OutputT]
+        self, start: EdgeStarter[StateT, Any, T], edges_: Edges[T, OutputT]
     ) -> None:
         raise NotImplementedError
 
@@ -209,12 +200,11 @@ class Graph[StateT, InputT, OutputT]:
 #         raise NotImplementedError
 
 
-class TransformContext[StateT, InputT, OutputT]:
+class TransformContext[StateT, OutputT]:
     """The main reason this is not a dataclass is that we need it to be covariant in its type parameters."""
 
-    def __init__(self, state: StateT, inputs: InputT, output: OutputT):
+    def __init__(self, state: StateT, output: OutputT):
         self._state = state
-        self._inputs = inputs
         self._output = output
 
     @property
@@ -222,33 +212,27 @@ class TransformContext[StateT, InputT, OutputT]:
         return self._state
 
     @property
-    def inputs(self) -> InputT:
-        return self._inputs
-
-    @property
     def output(self) -> OutputT:
         return self._output
 
     def __repr__(self):
-        return f'{self.__class__.__name__}(state={self.state}, inputs={self.inputs}, output={self.output})'
+        return f'{self.__class__.__name__}(state={self.state}, output={self.output})'
 
 
-class _Transform[StateT, InputT, OutputT, T](Protocol):
-    def __call__(self, ctx: TransformContext[StateT, InputT, OutputT]) -> T:
+class TransformFunction[StateT, InputT, OutputT](Protocol):
+    """Note: the InputT will be the OutputT of the source node, and the OutputT will be the InputT of the destination node.
+    """
+
+    def __call__(self, ctx: TransformContext[StateT, InputT]) -> OutputT:
         raise NotImplementedError
 
 
-type TransformFunction[StateT, SourceInputT, SourceOutputT, DestinationInputT] = (
-    _Transform[StateT, SourceInputT, SourceOutputT, DestinationInputT]
-)
-
-
 @dataclass
-class Edge[SourceT, GraphStateT, EdgeInputT, EdgeOutputT]:
+class EdgeBuilder[GraphStateT, SourceT, EdgeOutputT]:
     _source_type: type[SourceT]
     _is_instance: Callable[[Any], bool]
-    _transforms: tuple[TransformFunction[GraphStateT, EdgeInputT, Any, Any], ...] = (
-        field(default=())
+    _transforms: tuple[TransformFunction[GraphStateT, Any, Any], ...] = field(
+        default=()
     )
     _end: bool = field(init=False, default=False)
 
@@ -270,10 +254,10 @@ class Edge[SourceT, GraphStateT, EdgeInputT, EdgeOutputT]:
 
     def transform[T](
         self,
-        call: _Transform[GraphStateT, EdgeInputT, EdgeOutputT, T],
-    ) -> Edge[SourceT, GraphStateT, EdgeInputT, T]:
+        call: TransformFunction[GraphStateT, EdgeOutputT, T],
+    ) -> EdgeBuilder[GraphStateT, SourceT, T]:
         new_transforms = self._transforms + (call,)
-        return Edge(self._source_type, self._is_instance, new_transforms)
+        return EdgeBuilder(self._source_type, self._is_instance, new_transforms)
 
     # def handle_parallel[HandleOutputItemT, T, S](
     #     self: Edge[

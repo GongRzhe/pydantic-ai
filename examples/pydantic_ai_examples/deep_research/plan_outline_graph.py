@@ -24,7 +24,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .graph import Graph, Interruption, TransformContext, edges
+from .graph import Graph, Interruption, TransformContext, graph_node
 from .nodes import Prompt, TypeUnion
 from .shared_types import MessageHistory, Outline
 
@@ -103,24 +103,6 @@ class YieldToHuman:
     message: str
 
 
-# Graph nodes
-handle_user_message = Prompt(
-    input_type=MessageHistory,
-    output_type=TypeUnion[Refuse | Clarify | Proceed],
-    prompt='Decide how to proceed from user message',  # prompt
-)
-
-generate_outline = Prompt(
-    input_type=GenerateOutlineInputs,
-    output_type=Outline,
-    prompt='Generate the outline',
-)
-
-review_outline = Prompt(
-    input_type=ReviewOutlineInputs,
-    output_type=TypeUnion[ReviseOutline | ApproveOutline],
-    prompt='Review the outline',
-)
 
 
 def transform_proceed(ctx: TransformContext[object, MessageHistory, object]):
@@ -161,6 +143,40 @@ g = Graph.builder(
     ],
     # start_at=handle_user_message,
 )
+
+# TODO: If we drop inputs from the transform functions, we'll need a way to decide what to pass to the prompt node to only include some of the inputs...
+#   Is there any typesafe way to generate a template in JSON schema?
+
+
+# Graph nodes
+# TODO: Need to make it easier to change the model; should be a parameter to the graph
+@graph_node
+async def handle_user_message(inputs: MessageHistory) -> Refuse | Clarify | Proceed:
+    result = await Prompt(
+        input_type=MessageHistory,
+        output_type=Refuse | Clarify | Proceed,  # pyright: ignore['abc']
+        prompt='Decide how to proceed from user message',
+    ).run(None, inputs)
+    return result
+
+@graph_node
+async def generate_outline(inputs: GenerateOutlineInputs) -> Outline:
+    result = await Prompt(
+        input_type=GenerateOutlineInputs,
+        output_type=Outline,
+        prompt='Generate the outline',
+    ).run(None, inputs)
+    return result
+
+@graph_node
+async def review_outline(inputs: ReviewOutlineInputs) -> ReviseOutline | ApproveOutline:
+    result = await Prompt(
+        input_type=ReviewOutlineInputs,
+        output_type=ReviseOutline | ApproveOutline,
+        prompt='Review the outline',
+    ).run(None, inputs)
+    return result
+
 
 g.add_edges(
     handle := g.start_edge(handle_user_message),
