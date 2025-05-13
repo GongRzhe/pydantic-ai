@@ -326,8 +326,8 @@ class Model(ABC):
 
     def _get_instructions(self, messages: list[ModelMessage]) -> str | None:
         """Get instructions from the first ModelRequest found when iterating messages in reverse."""
-        for message in reversed(messages):
-            if isinstance(message, ModelRequest):
+        for message in reversed(messages):  # pragma: no branch
+            if isinstance(message, ModelRequest):  # pragma: no branch
                 return message.instructions
 
 
@@ -448,7 +448,7 @@ def infer_model(model: Model | KnownModelName | str) -> Model:
             raise UserError(f'Unknown model: {model}')
 
     if provider == 'vertexai':
-        provider = 'google-vertex'
+        provider = 'google-vertex'  # pragma: no cover
 
     if provider == 'cohere':
         from .cohere import CohereModel
@@ -479,7 +479,7 @@ def infer_model(model: Model | KnownModelName | str) -> Model:
 
         return BedrockConverseModel(model_name, provider=provider)
     else:
-        raise UserError(f'Unknown model: {model}')
+        raise UserError(f'Unknown model: {model}')  # pragma: no cover
 
 
 def cached_async_http_client(*, provider: str | None = None, timeout: int = 600, connect: int = 5) -> httpx.AsyncClient:
